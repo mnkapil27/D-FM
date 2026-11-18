@@ -1,0 +1,18 @@
+{
+  "clients": {
+    "pizza_hub": {
+      "name": "Pizza Hub",
+      "ad_account_id": "act_123456789012345",
+      "page_id": "102030405060708",
+      "max_daily_budget": 50,
+      "max_lifetime_budget": 1000,
+      "notes": "Lead ads, Ahmedabad only"
+    },
+    "smile_dental": {
+      "name": "Smile Dental Clinic",
+      "ad_account_id": "act_987654321098765",
+      "page_id": "908070605040302",
+      "max_daily_budget": 2000
+    }
+  }
+}
