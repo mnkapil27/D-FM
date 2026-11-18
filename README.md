@@ -5,6 +5,7 @@ Your own server that lets **Claude manage Facebook and Instagram ads for all you
 - It talks **directly** to Meta (graph.facebook.com). No third-party tools.
 - One token (from your Business Manager) works for **all clients**.
 - Every client has its own **ad account** and **Page**, written in one file (`clients.json`).
+- **Dashboard website:** a live page for all clients (spend, leads, CPL, CPC, ROAS) with a date picker. See [Dashboard website](#dashboard-website).
 - **Safe by default:** nothing changes unless you say `confirm=true`. New campaigns, ad sets and ads are always created **PAUSED**. You can set a **max budget** per client.
 
 ---
@@ -180,17 +181,21 @@ claude mcp add facebook-ads -- /full/path/.venv/bin/python -m fb_ads_mcp --stdio
    (Or **New → Web Service**, Build command `pip install -r requirements.txt`, Start command `python -m fb_ads_mcp`.)
 3. In **Environment**, add:
    - `META_ACCESS_TOKEN` = your token
-   - `MCP_AUTH_TOKEN` = your random password
+   - `MCP_AUTH_TOKEN` = your random password (for Claude)
+   - `DASHBOARD_PASSWORD` = password for the dashboard website
    - `CLIENTS_JSON` = the whole content of your `clients.json` (paste it all)
 4. Deploy. You get a URL like `https://facebook-ads-mcp.onrender.com`.
 5. Test: open `https://facebook-ads-mcp.onrender.com/health`.
+6. Dashboard: open `https://facebook-ads-mcp.onrender.com/dashboard` and log in.
+
+**Want to see the dashboard before you have the token?** Deploy with only `DASHBOARD_PASSWORD` (leave `META_ACCESS_TOKEN` empty). You will see demo data. Later add the token and click **Manual Deploy → Restart**.
 
 Use a paid plan (Starter). The free plan sleeps, and Claude may time out on the first call.
 
 ### Option B: Railway
 
 1. Go to <https://railway.app> → **New Project → Deploy from GitHub repo** → choose your repo.
-2. In **Variables**, add the same 3 variables: `META_ACCESS_TOKEN`, `MCP_AUTH_TOKEN`, `CLIENTS_JSON`.
+2. In **Variables**, add the same variables: `META_ACCESS_TOKEN`, `MCP_AUTH_TOKEN`, `DASHBOARD_PASSWORD`, `CLIENTS_JSON`.
 3. Railway uses the `Procfile` (or the `Dockerfile`). In **Settings → Networking**, click **Generate Domain**.
 4. Test: open `https://your-app.up.railway.app/health`.
 
@@ -210,6 +215,58 @@ Use a paid plan (Starter). The free plan sleeps, and Claude may time out on the 
 7. Try: "List my clients" then "Show spend and leads for all clients yesterday".
 
 Anyone with this URL can control your ads. **Do not share the URL.** If it leaks, change `MCP_AUTH_TOKEN` in Render/Railway and update the connector URL.
+
+---
+
+## Dashboard website
+
+The same server also gives you a **website** at `/dashboard`. Open it in any browser (computer or phone).
+
+- **All clients page:** one line per client: Spend, Leads, CPL (cost per lead), Clicks, CPC, CTR, Impressions, ROAS. Total on top. Click a column name to sort.
+- **Client page:** click a client name. You see the totals, a chart **spend per day** and **leads per day**, and every campaign with its own numbers. There is also a link to open that account in Ads Manager.
+- **Date picker:** Today, Yesterday, Last 7 / 14 / 30 / 90 days, This month, Last month, All time, or your own From / To dates.
+- **Password:** only people with `DASHBOARD_PASSWORD` can open it. Login stays for 7 days.
+- Numbers come **directly from Meta** with your System User token. They are kept for 5 minutes (so Meta does not block you for too many calls). Press **Refresh** to get fresh numbers now.
+- It only **reads** data. It cannot change any ad.
+
+### Try it first with fake numbers (demo mode)
+
+You can see the dashboard **before** you have a token.
+
+```bash
+pip install -r requirements.txt
+python -m fb_ads_mcp.dashboard
+```
+
+Open <http://localhost:8000/dashboard>. Because `META_ACCESS_TOKEN` is empty, it shows **DEMO DATA** (fake clients, fake numbers). If you already made `clients.json`, it shows your real client names with fake numbers.
+
+To force demo mode even when the token is set, put `DASHBOARD_DEMO=true` in `.env`.
+
+### Use it with real data
+
+1. Put these in `.env` (computer) or in Render → **Environment**:
+   - `META_ACCESS_TOKEN` = your System User token (Step 2)
+   - `DASHBOARD_PASSWORD` = a password you choose (make it long)
+   - `CLIENTS_JSON` (Render) or `clients.json` (computer) = your client list (Step 3)
+2. Start the server (`python -m fb_ads_mcp`) or deploy on Render (Step 5).
+3. Open `https://YOUR-APP.onrender.com/dashboard` (on your computer: <http://localhost:8000/dashboard>), type the password. Done.
+
+The main address `https://YOUR-APP.onrender.com/` also opens the dashboard.
+
+If `DASHBOARD_PASSWORD` is empty and a real token is set, the dashboard shows "Password not set" and no data. This is on purpose: client numbers are private.
+
+### Only the dashboard, without Claude (MCP)
+
+- On Render: leave `MCP_AUTH_TOKEN` empty. The dashboard works, and `/mcp` is switched off.
+- Or start only the website: `python -m fb_ads_mcp.dashboard` (Render start command too).
+
+### Only Claude (MCP), no dashboard
+
+Set `DASHBOARD_ENABLED=false`.
+
+### Share with a client?
+
+The dashboard shows **all** clients to anyone with the password. Give the password only to your own team. (Do not give it to a client: they would see other clients too.)
 
 ---
 
@@ -234,6 +291,11 @@ Anyone with this URL can control your ads. **Do not share the URL.** If it leaks
 | `GLOBAL_MAX_DAILY_BUDGET` | no | Max daily budget for all clients |
 | `GLOBAL_MAX_LIFETIME_BUDGET` | no | Max lifetime budget for all clients |
 | `ALLOW_UNKNOWN_ACCOUNTS` | no | `true` lets tools use any `act_...` id |
+| `DASHBOARD_PASSWORD` | yes (dashboard with real data) | Password for the `/dashboard` website |
+| `DASHBOARD_DEMO` | no | `true` = fake numbers. Demo is also used when there is no token. |
+| `DASHBOARD_CACHE_SECONDS` | no | Default `300` (5 min). How long numbers are kept before asking Meta again. |
+| `DASHBOARD_ENABLED` | no | `false` turns the website off |
+| `DASHBOARD_SECRET` | no | Extra secret for the login cookie. Change it to log everybody out. |
 | `PORT` / `HOST` | no | Server port (Render/Railway set `PORT` for you) |
 
 ## Put the code on GitHub
@@ -262,6 +324,10 @@ Anyone with this URL can control your ads. **Do not share the URL.** If it leaks
 | Page metric error | Meta sometimes renames Page metrics. Pass other names in `metrics`. Followers still work. |
 | `401 unauthorized` | The `?key=` in the connector URL is not the same as `MCP_AUTH_TOKEN` |
 | Wrong budget amount | Budgets are in account currency, not cents. 500 = 500 INR. |
+| Dashboard says "Password not set" | Add `DASHBOARD_PASSWORD` in Render → Environment and restart |
+| Dashboard shows **DEMO DATA** | `META_ACCESS_TOKEN` is empty, or `DASHBOARD_DEMO=true`. Fix it and restart. |
+| Dashboard row says "Could not load" | Same as the Meta errors above. Mostly the System User is not assigned to that ad account. |
+| Dashboard numbers are a few minutes old | They are kept 5 minutes. Press **Refresh**. |
 
 ## Files
 
@@ -272,6 +338,12 @@ fb_ads_mcp/
   insights.py   turns Meta numbers into spend / leads / CPL / CPC / ROAS
   config.py     reads .env and clients.json
   __main__.py   starts the server (HTTP with secret key, or --stdio)
+  dashboard/    the dashboard website (/dashboard)
+    __init__.py   pages and login
+    data.py       gets numbers from Meta (uses meta_api.py + insights.py)
+    views.py      the HTML, table and charts
+    demo.py       fake numbers for demo mode
+    dates.py      date picker ranges
 tests/          offline tests
 clients.example.json, .env.example, render.yaml, Procfile, Dockerfile
 ```

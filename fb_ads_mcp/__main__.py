@@ -1,6 +1,7 @@
 """Start the server.
 
   python -m fb_ads_mcp            -> HTTP server (for Render / Railway / Claude connector)
+                                     with the dashboard website at /dashboard
   python -m fb_ads_mcp --stdio    -> stdio (for Claude Desktop / Claude Code on your computer)
 """
 
@@ -11,7 +12,7 @@ import os
 import sys
 from urllib.parse import parse_qs
 
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 from .server import mcp, settings
 
@@ -26,13 +27,17 @@ class SecretKeyMiddleware:
 
     OPEN_PATHS = {"/health", "/"}
 
-    def __init__(self, app, secret: str):
+    def __init__(self, app, secret: str | None):
         self.app = app
         self.secret = secret
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope.get("path") in self.OPEN_PATHS:
             return await self.app(scope, receive, send)
+        if not self.secret:
+            resp = JSONResponse({"error": "MCP is off. Set MCP_AUTH_TOKEN to turn it on."},
+                                status_code=503)
+            return await resp(scope, receive, send)
         given = ""
         qs = parse_qs(scope.get("query_string", b"").decode())
         if qs.get("key"):
@@ -56,13 +61,43 @@ async def root(_request):
     return JSONResponse({"ok": True, "mcp_endpoint": "/mcp"})
 
 
+class DashboardRouter:
+    """Sends /dashboard... to the dashboard website and everything else to MCP."""
+
+    def __init__(self, mcp_app, dashboard_app):
+        self.mcp_app = mcp_app
+        self.dashboard_app = dashboard_app
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if path == "/dashboard" or path.startswith("/dashboard/"):
+            return await self.dashboard_app(scope, receive, send)
+        if path == "/":
+            resp = RedirectResponse("/dashboard", status_code=307)
+            return await resp(scope, receive, send)
+        return await self.mcp_app(scope, receive, send)
+
+
+def _dashboard_on() -> bool:
+    return os.getenv("DASHBOARD_ENABLED", "true").strip().lower() not in ("0", "false", "no", "off")
+
+
 def build_http_app():
-    if not settings.mcp_auth_token:
+    dashboard = _dashboard_on()
+    if not settings.mcp_auth_token and not dashboard:
         raise SystemExit(
             "MCP_AUTH_TOKEN is not set. Set a long random secret before starting the "
             "HTTP server, otherwise anyone could control your ads."
         )
-    return SecretKeyMiddleware(mcp.streamable_http_app(), settings.mcp_auth_token)
+    if not settings.mcp_auth_token:
+        print("MCP_AUTH_TOKEN is not set: the MCP endpoint is OFF, only the dashboard runs.",
+              file=sys.stderr)
+    app = SecretKeyMiddleware(mcp.streamable_http_app(), settings.mcp_auth_token)
+    if dashboard:
+        from .dashboard import create_dashboard_app
+
+        app = DashboardRouter(app, create_dashboard_app())
+    return app
 
 
 def main() -> None:
